@@ -150,3 +150,9 @@ class Queue(object):
             r[kind]=len(self.list(kind))
         return r
 
+    def watch(self,delay=1):
+        while True:
+            print(self.info())
+            time.sleep(delay)
+
+
