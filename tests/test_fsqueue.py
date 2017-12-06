@@ -18,8 +18,14 @@ def test_one():
     t=queue.get()
     assert t==t1
 
-    t=queue.get()
+    with pytest.raises(fsqueue.CurrentTaskUnfinished):
+        t=queue.get()
+
+    queue.task_done()
+
+    t = queue.get()
     assert t==t2
+    queue.task_failed()
 
     with pytest.raises(fsqueue.Empty):
         queue.get()

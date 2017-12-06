@@ -11,10 +11,14 @@ import glob
 class Empty(Exception):
     pass
 
+class CurrentTaskUnfinished(Exception):
+    pass
+
 class Task(object):
-    def __init__(self,task_data, shortname=None):
+    def __init__(self,task_data, shortname=None,completename=None):
         self.task_data=task_data
         self.shortname = shortname
+        self.completename=completename
         self.submission_info=self.construct_submission_info()
 
     def construct_submission_info(self):
@@ -36,16 +40,19 @@ class Task(object):
 
 
     @classmethod
-    def from_file(cls,fn):
+    def from_file(cls,fn,completename=None):
         task_dict=yaml.load(open(fn))
 
-        self=cls(task_dict['task_data'])
+        self=cls(task_dict['task_data'],completename=completename)
         self.submission_info=task_dict['submission_info']
 
         return self
 
     @property
     def filename(self):
+        if self.completename is not None:
+            return self.completename
+
         filename="%.14lg"%self.submission_info['time']
         filename+="_"+self.submission_info['utc']
 
@@ -92,18 +99,29 @@ class Queue(object):
         open(self.queue_dir("waiting")+"/"+task.filename,"w").write(task.serialize())
 
     def get(self):
+        if self.current_task is not None:
+            raise CurrentTaskUnfinished(self.current_task)
+
         tasks=self.list()
 
         if len(tasks)==0:
             raise Empty()
 
         task_name=tasks[-1]
-        self.current_task = Task.from_file(self.queue_dir("waiting")+"/"+task_name)
+        self.current_task = Task.from_file(self.queue_dir("waiting")+"/"+task_name, completename=task_name)
         self.move_task(task_name,"waiting","running")
 
         print('task',self.current_task.submission_info)
 
         return self.current_task.task_data
+
+    def task_done(self):
+        self.move_task(self.current_task.filename,"running","done")
+        self.current_task=None
+
+    def task_failed(self):
+        self.move_task(self.current_task.filename, "running", "failed")
+        self.current_task = None
 
     def move_task(self,taskname,fromk,tok):
         os.rename(
