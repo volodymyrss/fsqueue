@@ -143,3 +143,10 @@ class Queue(object):
                 waiting_jobs.append(fn.replace(taskdir+"/",""))
         return waiting_jobs
 
+    @property
+    def info(self):
+        r={}
+        for kind in "waiting","running","done","failed":
+            r[kind]=len(self.list(kind))
+        return r
+
