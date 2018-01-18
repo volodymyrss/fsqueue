@@ -49,20 +49,30 @@ class Task(object):
         return self
 
     @property
+    def filename_withtime(self):
+        return self.get_filename()
+
+    @property
     def filename(self):
+        return self.get_filename(timestamp=False)
+
+    def get_filename(self,timestamp=True):
         if self.completename is not None:
             return self.completename
 
-        filename="%.14lg"%self.submission_info['time']
-        filename+="_"+self.submission_info['utc']
+        filename_components=[]
 
-        filename+="_"+sha224(str(self.submission_info).encode('utf-8')).hexdigest()[:8]
-        filename +="_"+ sha224(str(self.task_data).encode('utf-8')).hexdigest()[:8]
+        if timestamp:
+            filename_components.append("%.14lg"%self.submission_info['time'])
+            filename_components.append(self.submission_info['utc'])
 
         if self.shortname is not None:
-            filename+="_"+self.shortname
+            filename_components.append(self.shortname)
 
-        return filename
+        filename_components.append(sha224(str(self.submission_info).encode('utf-8')).hexdigest()[:8])
+        filename_components.append(sha224(str(self.task_data).encode('utf-8')).hexdigest()[:8])
+
+        return "_".join(filename_components)
 
 def makedir_if_neccessary(directory):
     try:
@@ -72,6 +82,8 @@ def makedir_if_neccessary(directory):
 
 
 class Queue(object):
+    use_timestamps=False
+
     def __init__(self,root_directory):
         self.root_directory=root_directory
         self.init_directory_tree()

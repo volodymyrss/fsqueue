@@ -1,4 +1,5 @@
 import pytest
+import glob
 
 def test_one():
     import fsqueue
@@ -6,12 +7,14 @@ def test_one():
     queue=fsqueue.Queue("./queue")
     queue.wipe()
 
-    t1=dict(test=1,data=2)
+    t1 = dict(test=1, data=2)
     t2 = dict(test=1, data=3)
 
-    queue.put(t1,shortname="2")
-    queue.put(t2)
+    queue.put(t1)
+    queue.put(t2,shortname="custom_job")
     print(queue.info)
+
+    print glob.glob(queue.queue_dir("waiting")+"/*")
 
     assert len(queue.list())==2
     print(queue.info)
