@@ -10,8 +10,10 @@ def test_one():
     t1 = dict(test=1, data=2)
     t2 = dict(test=1, data=3)
 
-    queue.put(t1)
-    queue.put(t2,shortname="custom_job")
+    assert queue.put(t1) is None
+    assert queue.put(t1) is not None
+    queue.put(t2, shortname="custom_job")
+
     print(queue.info)
 
     print glob.glob(queue.queue_dir("waiting")+"/*")

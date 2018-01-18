@@ -49,28 +49,29 @@ class Task(object):
         return self
 
     @property
-    def filename_withtime(self):
-        return self.get_filename()
+    def filename_instance(self):
+        return self.get_filename(False)
 
     @property
-    def filename(self):
-        return self.get_filename(timestamp=False)
+    def filename_key(self):
+        return self.get_filename(True)
 
-    def get_filename(self,timestamp=True):
+    def get_filename(self,key=True):
         if self.completename is not None:
             return self.completename
 
         filename_components=[]
 
-        if timestamp:
-            filename_components.append("%.14lg"%self.submission_info['time'])
-            filename_components.append(self.submission_info['utc'])
+        filename_components.append(sha224(str(self.task_data).encode('utf-8')).hexdigest()[:8])
 
         if self.shortname is not None:
             filename_components.append(self.shortname)
 
-        filename_components.append(sha224(str(self.submission_info).encode('utf-8')).hexdigest()[:8])
-        filename_components.append(sha224(str(self.task_data).encode('utf-8')).hexdigest()[:8])
+        if not key:
+            filename_components.append("%.14lg"%self.submission_info['time'])
+            filename_components.append(self.submission_info['utc'])
+
+            filename_components.append(sha224(str(self.submission_info).encode('utf-8')).hexdigest()[:8])
 
         return "_".join(filename_components)
 
@@ -108,7 +109,13 @@ class Queue(object):
 
     def put(self,task_data,shortname=None):
         task=Task(task_data,shortname)
-        open(self.queue_dir("waiting")+"/"+task.filename,"w").write(task.serialize())
+
+        instances_for_key=glob.glob(self.queue_dir("waiting")+"/"+task.filename_key+"*")
+        if len(instances_for_key)>0:
+            print("found existing instance(s) for this key, no need to put:",instances_for_key)
+            return instances_for_key
+        else:
+            open(self.queue_dir("waiting")+"/"+task.filename_instance,"w").write(task.serialize())
 
     def get(self):
         if self.current_task is not None:
@@ -128,11 +135,11 @@ class Queue(object):
         return self.current_task.task_data
 
     def task_done(self):
-        self.move_task(self.current_task.filename,"running","done")
+        self.move_task(self.current_task.filename_instance,"running","done")
         self.current_task=None
 
     def task_failed(self):
-        self.move_task(self.current_task.filename, "running", "failed")
+        self.move_task(self.current_task.filename_instance, "running", "failed")
         self.current_task = None
 
     def move_task(self,taskname,fromk,tok):
@@ -148,7 +155,7 @@ class Queue(object):
     def list(self,kind="waiting",fullpath=False):
         taskdir=self.queue_dir(kind)
         waiting_jobs=[]
-        for fn in reversed(sorted(glob.glob(taskdir + "/*"))):
+        for fn in reversed(sorted(glob.glob(taskdir + "/*"),key=os.path.getctime)):
             if fullpath:
                 waiting_jobs.append(fn)
             else:
