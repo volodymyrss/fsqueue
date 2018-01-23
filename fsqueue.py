@@ -15,11 +15,16 @@ class CurrentTaskUnfinished(Exception):
     pass
 
 class Task(object):
-    def __init__(self,task_data, shortname=None,completename=None):
+    def __init__(self,task_data, shortname=None,completename=None,execution_info=None, submission_data=None):
         self.task_data=task_data
         self.shortname = shortname
         self.completename=completename
         self.submission_info=self.construct_submission_info()
+
+        if submission_data is not None:
+            self.submission_info.update(submission_data)
+
+        self.execution_info=execution_info
 
     def construct_submission_info(self):
         return dict(
@@ -34,6 +39,7 @@ class Task(object):
         return yaml.dump(dict(
                 submission_info=self.submission_info,
                 task_data=self.task_data,
+                execution_info=self.execution_info,
             ),
             default_flow_style=False, default_style=''
         )
@@ -48,6 +54,9 @@ class Task(object):
 
         return self
 
+    def to_file(self,fn):
+        open(fn, "w").write(self.serialize())
+
     @property
     def filename_instance(self):
         return self.get_filename(False)
@@ -61,6 +70,9 @@ class Task(object):
             return self.completename
 
         filename_components=[]
+
+        print("encoding:")
+        print(str(self.task_data).encode('utf-8'))
 
         filename_components.append(sha224(str(self.task_data).encode('utf-8')).hexdigest()[:8])
 
@@ -85,10 +97,20 @@ def makedir_if_neccessary(directory):
 class Queue(object):
     use_timestamps=False
 
+
     def __init__(self,root_directory):
         self.root_directory=root_directory
         self.init_directory_tree()
         self.current_task=None
+        self.current_task_status=None
+
+    @property
+    def taskname(self):
+        return self.current_task.filename_instance
+
+    @property
+    def task_fn(self):
+        return self.queue_dir(self.current_task_status)+"/"+self.current_task.filename_instance
 
     def lock(self):
         pass
@@ -107,15 +129,20 @@ class Queue(object):
         makedir_if_neccessary(self.queue_dir("done"))
         makedir_if_neccessary(self.queue_dir("failed"))
 
-    def put(self,task_data,shortname=None):
-        task=Task(task_data,shortname)
+    def put(self,task_data,shortname=None,submission_data=None):
+        task=Task(task_data,shortname,submission_data=submission_data)
 
-        instances_for_key=glob.glob(self.queue_dir("waiting")+"/"+task.filename_key+"*")
+        instances_for_key=[]
+        for state in ["waiting","running","done","failed"]:
+            instances_for_key+=[
+                    dict(state=state,fn=fn) for fn in glob.glob(self.queue_dir(state)+"/"+task.filename_key+"*")
+                ]
+
         if len(instances_for_key)>0:
             print("found existing instance(s) for this key, no need to put:",instances_for_key)
             return instances_for_key
-        else:
-            open(self.queue_dir("waiting")+"/"+task.filename_instance,"w").write(task.serialize())
+
+        open(self.queue_dir("waiting")+"/"+task.filename_instance,"w").write(task.serialize())
 
     def get(self):
         if self.current_task is not None:
@@ -127,26 +154,49 @@ class Queue(object):
             raise Empty()
 
         task_name=tasks[-1]
+
         self.current_task = Task.from_file(self.queue_dir("waiting")+"/"+task_name, completename=task_name)
-        self.move_task(task_name,"waiting","running")
+        self.current_task_status = "waiting"
+        self.clear_current_task_entry()
+
+        self.current_task_status = "running"
+        self.current_task.to_file(self.task_fn)
 
         print('task',self.current_task.submission_info)
 
-        return self.current_task.task_data
+        return self.current_task
 
     def task_done(self):
-        self.move_task(self.current_task.filename_instance,"running","done")
+        #self.move_task(self.current_task.filename_instance,"running","done")
+        self.clear_current_task_entry()
+        self.current_task_status="done"
+        self.current_task.to_file(self.task_fn)
+
         self.current_task=None
 
-    def task_failed(self):
-        self.move_task(self.current_task.filename_instance, "running", "failed")
+    def task_failed(self,update=lambda x:None):
+        self.clear_current_task_entry()
+        self.current_task_status = "failed"
+
+        update(self.current_task)
+
+        self.current_task.to_file(self.task_fn)
+
         self.current_task = None
 
-    def move_task(self,taskname,fromk,tok):
-        os.rename(
-            self.queue_dir(fromk) + "/" + taskname,
-            self.queue_dir(tok) + "/" + taskname,
-        )
+    def clear_current_task_entry(self,status=None):
+        if status is None:
+            status=self.current_task_status
+        os.remove(self.queue_dir(status) + "/" + self.current_task.filename_instance)
+
+    def move_task(self,fromk,tok):
+        task=Task.from_file(self.queue_dir(fromk) + "/" + self.taskname)
+        task.to_file(self.queue_dir(tok) + "/" + self.taskname)
+
+#        os.rename(
+#            self.queue_dir(fromk) + "/" + taskname,
+#            self.queue_dir(tok) + "/" + taskname,
+#        )
 
     def wipe(self):
         for taskname in self.list('waiting'):
