@@ -189,28 +189,36 @@ class Queue(object):
             status=self.current_task_status
         os.remove(self.queue_dir(status) + "/" + self.current_task.filename_instance)
 
-    def move_task(self,fromk,tok):
-        task=Task.from_file(self.queue_dir(fromk) + "/" + self.taskname)
-        task.to_file(self.queue_dir(tok) + "/" + self.taskname)
+    def copy_task(self,fromk,tok,taskname=None):
+        if taskname is None:
+            taskname=self.taskname
 
-#        os.rename(
-#            self.queue_dir(fromk) + "/" + taskname,
-#            self.queue_dir(tok) + "/" + taskname,
-#        )
+        task=Task.from_file(self.queue_dir(fromk) + "/" + taskname)
+        task.to_file(self.queue_dir(tok) + "/" + taskname)
 
-    def wipe(self):
-        for taskname in self.list('waiting'):
-            self.move_task(taskname,"waiting","deleted")
+    def move_task(self,fromk,tok,taskname=None):
+        if taskname is None:
+            taskname=self.taskname
+
+        task=Task.from_file(self.queue_dir(fromk) + "/" + taskname)
+        task.to_file(self.queue_dir(tok) + "/" + taskname)
+        os.remove(self.queue_dir(fromk) + "/" + taskname)
+
+
+    def wipe(self,wipe_from=["waiting"]):
+        for fromk in wipe_from:
+            for taskname in self.list(fromk):
+                self.move_task(fromk,"deleted",taskname=taskname)
 
     def list(self,kind="waiting",fullpath=False):
         taskdir=self.queue_dir(kind)
-        waiting_jobs=[]
+        kind_jobs=[]
         for fn in reversed(sorted(glob.glob(taskdir + "/*"),key=os.path.getctime)):
             if fullpath:
-                waiting_jobs.append(fn)
+                kind_jobs.append(fn)
             else:
-                waiting_jobs.append(fn.replace(taskdir+"/",""))
-        return waiting_jobs
+                kind_jobs.append(fn.replace(taskdir+"/",""))
+        return kind_jobs
 
     @property
     def info(self):
