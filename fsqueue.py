@@ -15,11 +15,12 @@ class CurrentTaskUnfinished(Exception):
     pass
 
 class Task(object):
-    def __init__(self,task_data, shortname=None,completename=None,execution_info=None, submission_data=None):
+    def __init__(self,task_data, shortname=None,completename=None,execution_info=None, submission_data=None, depends_on=None):
         self.task_data=task_data
         self.shortname = shortname
         self.completename=completename
         self.submission_info=self.construct_submission_info()
+        self.depends_on=depends_on
 
         if submission_data is not None:
             self.submission_info.update(submission_data)
@@ -40,6 +41,7 @@ class Task(object):
                 submission_info=self.submission_info,
                 task_data=self.task_data,
                 execution_info=self.execution_info,
+                depends_on=self.depends_on,
             ),
             default_flow_style=False, default_style=''
         )
@@ -50,6 +52,7 @@ class Task(object):
         task_dict=yaml.load(open(fn))
 
         self=cls(task_dict['task_data'],completename=completename)
+        self.depends_on=task_dict['depends_on']
         self.submission_info=task_dict['submission_info']
 
         return self
@@ -71,8 +74,8 @@ class Task(object):
 
         filename_components=[]
 
-        print("encoding:")
-        print(str(self.task_data).encode('utf-8'))
+        #print("encoding:")
+        #print(str(self.task_data).encode('utf-8'))
 
         filename_components.append(sha224(str(self.task_data).encode('utf-8')).hexdigest()[:8])
 
@@ -86,6 +89,9 @@ class Task(object):
             filename_components.append(sha224(str(self.submission_info).encode('utf-8')).hexdigest()[:8])
 
         return "_".join(filename_components)
+
+    def __repr__(self):
+        return "[{}: {}]".format(self.__class__.__name__,self.task_data)
 
 def makedir_if_neccessary(directory):
     try:
@@ -128,21 +134,50 @@ class Queue(object):
         makedir_if_neccessary(self.queue_dir("running"))
         makedir_if_neccessary(self.queue_dir("done"))
         makedir_if_neccessary(self.queue_dir("failed"))
+        makedir_if_neccessary(self.queue_dir("locked"))
 
-    def put(self,task_data,shortname=None,submission_data=None):
-        task=Task(task_data,shortname,submission_data=submission_data)
+    def find_task_instances(self,task,klist=None):
+        if klist is None:
+            klist=["waiting", "running", "done", "failed", "locked"]
 
-        instances_for_key=[]
-        for state in ["waiting","running","done","failed"]:
+        instances_for_key = []
+        for state in klist:
             instances_for_key+=[
                     dict(state=state,fn=fn) for fn in glob.glob(self.queue_dir(state)+"/"+task.filename_key+"*")
                 ]
+        return instances_for_key
+
+
+    def put(self,task_data,shortname=None,submission_data=None, depends_on=None):
+        assert depends_on is None or type(depends_on) in [list,tuple]
+
+        task=Task(task_data,shortname,submission_data=submission_data,depends_on=depends_on)
+
+        instances_for_key=self.find_task_instances(task)
+
+        locked_instances=[i for i in instances_for_key if i['state'] == "locked"]
+        if len(locked_instances)>0:
+            assert len(locked_instances)==1
+
+            found_task=Task.from_file(locked_instances[0]['fn'])
+            print("task found locked",found_task,"will use instead of",task)
+            if len(self.find_incomplete_dependecies(found_task))==0:
+                print("dependecies complete, will unlock",found_task)
+                self.move_task("locked","waiting",found_task.filename_instance)
+                return
+            else:
+                print("task still locked", task)
+                return locked_instances
+
 
         if len(instances_for_key)>0:
             print("found existing instance(s) for this key, no need to put:",instances_for_key)
             return instances_for_key
 
-        open(self.queue_dir("waiting")+"/"+task.filename_instance,"w").write(task.serialize())
+        if depends_on is None:
+            open(self.queue_dir("waiting")+"/" + task.filename_instance,"w").write(task.serialize())
+        else:
+            open(self.queue_dir("locked") + "/" + task.filename_instance, "w").write(task.serialize())
 
     def get(self):
         if self.current_task is not None:
@@ -166,8 +201,26 @@ class Queue(object):
 
         return self.current_task
 
+    def find_incomplete_dependecies(self,task):
+        assert task.depends_on is not None, "can not inspect dependecies in an independent task!"
+
+        incomplete_dependencies=[]
+        for dependency in task.depends_on:
+            dependency_task=Task(dependency)
+            dependency_instances=self.find_task_instances(dependency_task)
+            print("dependency:", dependency, dependency_instances)
+            if len([i for i in dependency_instances if i['state']=="done"]) == 0:
+                print("dependency incomplete")
+                incomplete_dependencies.append(dependency_task)
+
+        return incomplete_dependencies
+
+
+
+
+
+
     def task_done(self):
-        #self.move_task(self.current_task.filename_instance,"running","done")
         self.clear_current_task_entry()
         self.current_task_status="done"
         self.current_task.to_file(self.task_fn)
@@ -223,7 +276,7 @@ class Queue(object):
     @property
     def info(self):
         r={}
-        for kind in "waiting","running","done","failed":
+        for kind in "waiting","running","done","failed","locked":
             r[kind]=len(self.list(kind))
         return r
 
