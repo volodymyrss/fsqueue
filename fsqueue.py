@@ -222,6 +222,10 @@ class Queue(object):
 
 
 
+    def task_locked(self):
+        self.clear_current_task_entry()
+        self.current_task_status="locked"
+        self.current_task=None
 
 
     def task_done(self):
@@ -261,6 +265,8 @@ class Queue(object):
         task.to_file(self.queue_dir(tok) + "/" + taskname)
         os.remove(self.queue_dir(fromk) + "/" + taskname)
 
+    def remove_task(self,fromk,taskname=None):
+        os.remove(self.queue_dir(fromk) + "/" + taskname)
 
     def wipe(self,wipe_from=["waiting"]):
         for fromk in wipe_from:
