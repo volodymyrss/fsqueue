@@ -175,9 +175,13 @@ class Queue(object):
             return instances_for_key
 
         if depends_on is None:
-            open(self.queue_dir("waiting")+"/" + task.filename_instance,"w").write(task.serialize())
+            fn=self.queue_dir("waiting") + "/" + task.filename_instance
+            open(fn,"w").write(task.serialize())
         else:
-            open(self.queue_dir("locked") + "/" + task.filename_instance, "w").write(task.serialize())
+            fn=self.queue_dir("locked") + "/" + task.filename_instance
+            open(fn, "w").write(task.serialize())
+
+        return dict(state="submitted",fn=fn)
 
     def get(self):
         if self.current_task is not None:
