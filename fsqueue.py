@@ -49,6 +49,9 @@ class Task(object):
 
     @classmethod
     def from_file(cls,fn,completename=None):
+        if completename is None:
+            completename=os.path.basename(fn)
+
         task_dict=yaml.load(open(fn))
 
         self=cls(task_dict['task_data'],completename=completename)
@@ -70,6 +73,7 @@ class Task(object):
 
     def get_filename(self,key=True):
         if self.completename is not None:
+            print("have completename:",self.completename)
             return self.completename
 
         filename_components=[]
@@ -78,6 +82,7 @@ class Task(object):
         #print(str(self.task_data).encode('utf-8'))
 
         filename_components.append(sha224(str(self.task_data).encode('utf-8')).hexdigest()[:8])
+        print("components:",filename_components)
 
         if self.shortname is not None:
             filename_components.append(self.shortname)
