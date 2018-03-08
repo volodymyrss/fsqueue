@@ -159,6 +159,11 @@ class Queue(object):
         task=Task(task_data,shortname,submission_data=submission_data,depends_on=depends_on)
 
         instances_for_key=self.find_task_instances(task)
+        assert len(instances_for_key)<=1
+        if len(instances_for_key) == 1:
+            instance_for_key=instances_for_key[0]
+        else:
+            instance_for_key=one
 
         locked_instances=[i for i in instances_for_key if i['state'] == "locked"]
         if len(locked_instances)>0:
@@ -172,12 +177,12 @@ class Queue(object):
                 return
             else:
                 print("task still locked", task)
-                return locked_instances
+                return locked_instance
 
 
         if len(instances_for_key)>0:
             print("found existing instance(s) for this key, no need to put:",instances_for_key)
-            return instances_for_key
+            return instance_for_key
 
         if depends_on is None:
             fn=self.queue_dir("waiting") + "/" + task.filename_instance

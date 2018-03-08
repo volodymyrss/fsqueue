@@ -15,8 +15,8 @@ def test_one():
     t1 = dict(test=1, data=2)
     t2 = dict(test=1, data=3)
 
-    assert queue.put(t1) is None
-    assert queue.put(t1) is not None
+    assert queue.put(t1)[0]['state'] == "submitted"
+    assert queue.put(t1)[0]['state'] == "waiting"
 
     time.sleep(0.1)
     queue.put(t2, shortname="custom_job")
