@@ -5,6 +5,12 @@ import os
 import time
 import socket
 from hashlib import sha224
+from collections import OrderedDict
+import logging
+
+logger=logging.getLogger("root")
+logger.setLevel(logging.DEBUG)
+
 
 import glob
 
@@ -69,18 +75,16 @@ class Task(object):
     def get_filename(self,key=True):
         filename_components=[]
 
-        #print("encoding:")
-        #print(str(self.task_data).encode('utf-8'))
 
         filename_components.append(sha224(str(self.task_data).encode('utf-8')).hexdigest()[:8])
-        print("components:",filename_components)
-
+        logger.debug("encoding:", filename_components)
+        logger.debug(str(self.task_data).encode('utf-8'))
 
         if not key:
             filename_components.append("%.14lg"%self.submission_info['time'])
             filename_components.append(self.submission_info['utc'])
 
-            filename_components.append(sha224(str(self.submission_info).encode('utf-8')).hexdigest()[:8])
+            filename_components.append(sha224(str(OrderedDict(sorted(self.submission_info.items()))).encode('utf-8')).hexdigest()[:8])
 
         return "_".join(filename_components)
 
@@ -141,6 +145,14 @@ class Queue(object):
                 ]
         return instances_for_key
 
+    def try_to_unlock(self,task):
+        if len(self.find_incomplete_dependecies(task)) == 0:
+            print("dependecies complete, will unlock", task)
+            self.move_task("locked", "waiting", task.filename_instance)
+            return dict(state="waiting", fn=self.queue_dir("waiting") + "/" + task.filename_instance)
+        else:
+            print("task still locked", task)
+            return dict(state="locked",fn=self.queue_dir("locked")+"/"+task.filename_instance)
 
     def put(self,task_data,submission_data=None, depends_on=None):
         assert depends_on is None or type(depends_on) in [list,tuple]
@@ -157,14 +169,8 @@ class Queue(object):
 
         if instance_for_key is not None and instance_for_key['state']=="locked" > 0:
             found_task=Task.from_file(instance_for_key['fn'])
-            print("task found locked",found_task,"will use instead of",task)
-            if len(self.find_incomplete_dependecies(found_task))==0:
-                print("dependecies complete, will unlock",found_task)
-                self.move_task("locked","waiting",found_task.filename_instance)
-                return
-            else:
-                print("task still locked", task)
-                return instance_for_key
+            print("task found locked", found_task, "will use instead of", task)
+            return self.try_to_unlock(found_task)
 
 
         if instance_for_key is not None:
@@ -178,6 +184,14 @@ class Queue(object):
             fn=self.queue_dir("locked") + "/" + task.filename_instance
             open(fn, "w").write(task.serialize())
 
+        recovered_task=Task.from_file(fn)
+        if recovered_task.filename_instance != task.filename_instance:
+            print("inconsitent storage:")
+            print("stored:",task.filename_instance)
+            print("recovered:", recovered_task.filename_instance)
+            raise Exception("Inconsistent storage")
+
+
         return dict(state="submitted",fn=fn)
 
     def get(self):
@@ -190,11 +204,17 @@ class Queue(object):
             raise Empty()
 
         task_name=tasks[-1]
-
+                
         self.current_task = Task.from_file(self.queue_dir("waiting")+"/"+task_name)
 
         print(self.current_task.filename_instance,task_name)
-        assert self.current_task.filename_instance == task_name
+
+        if self.current_task.filename_instance != task_name:
+            print("inconsitent storage:")
+            print(">>>> stored:", task_name)
+            print(">>>> recovered:", self.current_task.filename_instance)
+            raise Exception("Inconsistent storage")
+
         assert os.path.exists(self.queue_dir("waiting")+"/"+self.current_task.filename_instance)
 
         self.current_task_status = "waiting"
@@ -208,7 +228,8 @@ class Queue(object):
         return self.current_task
 
     def find_incomplete_dependecies(self,task):
-        assert task.depends_on is not None, "can not inspect dependecies in an independent task!"
+        if task.depends_on is None:
+            raise Exception("can not inspect dependecies in an independent task!")
 
         incomplete_dependencies=[]
         for dependency in task.depends_on:
@@ -224,9 +245,12 @@ class Queue(object):
 
 
 
-    def task_locked(self):
+    def task_locked(self,depends_on):
         self.clear_current_task_entry()
         self.current_task_status="locked"
+        self.current_task.depends_on=depends_on
+        self.current_task.to_file(self.queue_dir("locked")+"/"+self.current_task.filename_instance)
+
         self.current_task=None
 
 
@@ -275,14 +299,21 @@ class Queue(object):
             for taskname in self.list(fromk):
                 self.move_task(fromk,"deleted",taskname=taskname)
 
-    def list(self,kind="waiting",fullpath=False):
-        taskdir=self.queue_dir(kind)
-        kind_jobs=[]
-        for fn in reversed(sorted(glob.glob(taskdir + "/*"),key=os.path.getctime)):
-            if fullpath:
-                kind_jobs.append(fn)
-            else:
-                kind_jobs.append(fn.replace(taskdir+"/",""))
+    def list(self,kinds=None,fullpath=False,kind=None):
+        if kinds is None:
+            kinds=["waiting","locked"]
+        if kind is not None and kind not in kinds:
+            kinds.append(kind)
+
+        kind_jobs = []
+
+        for kind in kinds:
+            taskdir=self.queue_dir(kind)
+            for fn in reversed(sorted(glob.glob(taskdir + "/*"),key=os.path.getctime)):
+                if fullpath:
+                    kind_jobs.append(fn)
+                else:
+                    kind_jobs.append(fn.replace(taskdir+"/",""))
         return kind_jobs
 
     @property
