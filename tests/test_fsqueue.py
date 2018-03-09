@@ -9,12 +9,20 @@ def test_one():
     import fsqueue
 
     queue=fsqueue.Queue("./queue")
-    queue.wipe(["waiting","done","running"])
+    queue.wipe(["waiting","done","running","failed","locked"])
 
     assert queue.info['waiting']==0
+    assert queue.info['done']==0
+    assert queue.info['running']==0
+    assert queue.info['failed']==0
+    assert queue.info['locked']==0
 
     t1 = dict(test=1, data=2)
     t2 = dict(test=1, data=3)
+
+    assert queue.info['waiting']==0
+    assert queue.list('waiting')==[]
+    assert glob.glob("./queue/*/*")==[]
 
     r=queue.put(t1)
     assert r['state'] == "submitted"
@@ -22,6 +30,7 @@ def test_one():
     task=fsqueue.Task.from_file(r['fn'])
     assert os.path.exists(queue.queue_dir("waiting")+"/"+task.filename_instance)
 
+    print(queue.info)
     assert queue.info['waiting'] == 1
 
     assert queue.put(t1)['state'] == "waiting"
@@ -114,7 +123,10 @@ def test_locked_jobs():
     print(queue.info)
 
     print("expected resolved dependecy`")
-    assert queue.put(t1) is None
+    r=queue.try_all_locked()
+    assert len(r)==1
+    assert r[0]['state']=="waiting"
+   # assert queue.put(t1)['state'] == "waiting"
 
     assert len(queue.list("waiting")) == 1
     assert len(queue.list("locked")) == 0

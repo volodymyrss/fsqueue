@@ -144,6 +144,13 @@ class Queue(object):
                     dict(state=state,fn=fn) for fn in glob.glob(self.queue_dir(state)+"/"+task.filename_key+"*")
                 ]
         return instances_for_key
+    
+    def try_all_locked(self):
+        r=[]
+        for task_fn in self.list("locked"):
+            print("trying to unlock", task_fn)
+            r.append(self.try_to_unlock(Task.from_file(self.queue_dir("locked")+"/"+task_fn)))
+        return r
 
     def try_to_unlock(self,task):
         if len(self.find_incomplete_dependecies(task)) == 0:
@@ -167,11 +174,10 @@ class Queue(object):
         else:
             instance_for_key=None
 
-        if instance_for_key is not None and instance_for_key['state']=="locked" > 0:
+        if instance_for_key is not None and instance_for_key['state']=="locked":
             found_task=Task.from_file(instance_for_key['fn'])
             print("task found locked", found_task, "will use instead of", task)
             return self.try_to_unlock(found_task)
-
 
         if instance_for_key is not None:
             print("found existing instance(s) for this key, no need to put:",instances_for_key)
@@ -294,16 +300,21 @@ class Queue(object):
     def remove_task(self,fromk,taskname=None):
         os.remove(self.queue_dir(fromk) + "/" + taskname)
 
-    def wipe(self,wipe_from=["waiting"]):
+    def wipe(self,wipe_from=["waiting"],purge=True):
         for fromk in wipe_from:
             for taskname in self.list(fromk):
-                self.move_task(fromk,"deleted",taskname=taskname)
+                if purge:
+                    print("removing",self.queue_dir(fromk) + "/" + taskname)
+                    os.remove(self.queue_dir(fromk) + "/" + taskname)
+                else:
+                    print("to delete",self.queue_dir(fromk) + "/" + taskname)
+                    self.move_task(fromk,"deleted",taskname=taskname)
 
-    def list(self,kinds=None,fullpath=False,kind=None):
+    def list(self,kind=None,kinds=None,fullpath=False):
         if kinds is None:
-            kinds=["waiting","locked"]
-        if kind is not None and kind not in kinds:
-            kinds.append(kind)
+            kinds=["waiting"]
+        if kind is not None:
+            kinds=[kind]
 
         kind_jobs = []
 
