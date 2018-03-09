@@ -204,10 +204,13 @@ class Queue(object):
         if self.current_task is not None:
             raise CurrentTaskUnfinished(self.current_task)
 
-        tasks=self.list()
+        tasks=self.list("waiting")
 
         if len(tasks)==0:
-            raise Empty()
+            self.try_all_locked()
+            tasks=self.list("waiting")
+            if len(tasks)==0:
+                raise Empty()
 
         task_name=tasks[-1]
                 
