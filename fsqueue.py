@@ -15,10 +15,8 @@ class CurrentTaskUnfinished(Exception):
     pass
 
 class Task(object):
-    def __init__(self,task_data, shortname=None,completename=None,execution_info=None, submission_data=None, depends_on=None):
+    def __init__(self,task_data,execution_info=None, submission_data=None, depends_on=None):
         self.task_data=task_data
-        self.shortname = shortname
-        self.completename=completename
         self.submission_info=self.construct_submission_info()
         self.depends_on=depends_on
 
@@ -48,13 +46,10 @@ class Task(object):
 
 
     @classmethod
-    def from_file(cls,fn,completename=None):
-        if completename is None:
-            completename=os.path.basename(fn)
-
+    def from_file(cls,fn):
         task_dict=yaml.load(open(fn))
 
-        self=cls(task_dict['task_data'],completename=completename)
+        self=cls(task_dict['task_data'])
         self.depends_on=task_dict['depends_on']
         self.submission_info=task_dict['submission_info']
 
@@ -72,10 +67,6 @@ class Task(object):
         return self.get_filename(True)
 
     def get_filename(self,key=True):
-        if self.completename is not None:
-            print("have completename:",self.completename)
-            return self.completename
-
         filename_components=[]
 
         #print("encoding:")
@@ -84,8 +75,6 @@ class Task(object):
         filename_components.append(sha224(str(self.task_data).encode('utf-8')).hexdigest()[:8])
         print("components:",filename_components)
 
-        if self.shortname is not None:
-            filename_components.append(self.shortname)
 
         if not key:
             filename_components.append("%.14lg"%self.submission_info['time'])
@@ -153,10 +142,10 @@ class Queue(object):
         return instances_for_key
 
 
-    def put(self,task_data,shortname=None,submission_data=None, depends_on=None):
+    def put(self,task_data,submission_data=None, depends_on=None):
         assert depends_on is None or type(depends_on) in [list,tuple]
 
-        task=Task(task_data,shortname,submission_data=submission_data,depends_on=depends_on)
+        task=Task(task_data,submission_data=submission_data,depends_on=depends_on)
 
         instances_for_key=self.find_task_instances(task)
         assert len(instances_for_key)<=1
@@ -202,7 +191,12 @@ class Queue(object):
 
         task_name=tasks[-1]
 
-        self.current_task = Task.from_file(self.queue_dir("waiting")+"/"+task_name, completename=task_name)
+        self.current_task = Task.from_file(self.queue_dir("waiting")+"/"+task_name)
+
+        print(self.current_task.filename_instance,task_name)
+        assert self.current_task.filename_instance == task_name
+        assert os.path.exists(self.queue_dir("waiting")+"/"+self.current_task.filename_instance)
+
         self.current_task_status = "waiting"
         self.clear_current_task_entry()
 

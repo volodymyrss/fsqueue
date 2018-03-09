@@ -2,6 +2,7 @@ from __future__ import print_function
 
 import pytest
 import glob
+import os
 import time
 
 def test_one():
@@ -15,7 +16,11 @@ def test_one():
     t1 = dict(test=1, data=2)
     t2 = dict(test=1, data=3)
 
-    assert queue.put(t1)['state'] == "submitted"
+    r=queue.put(t1)
+    assert r['state'] == "submitted"
+
+    task=fsqueue.Task.from_file(r['fn'])
+    assert os.path.exists(queue.queue_dir("waiting")+"/"+task.filename_instance)
 
     assert queue.info['waiting'] == 1
 
@@ -23,7 +28,7 @@ def test_one():
 
     time.sleep(0.1)
 
-    assert queue.put(t2, shortname="custom_job")['state'] == "submitted"
+    assert queue.put(t2)['state'] == "submitted"
 
     assert queue.info['waiting'] == 2
 
@@ -37,7 +42,9 @@ def test_one():
     assert len(queue.list()) == 2
     print(queue.info)
 
-    t=queue.get().task_data
+    task=queue.get()
+
+    t=task.task_data
 
     assert queue.info['waiting'] == 1
     assert queue.info['running'] == 1
@@ -82,7 +89,7 @@ def test_locked_jobs():
     assert queue.put(t1,depends_on=[t2])['state']=="submitted"
 
     time.sleep(0.1)
-    queue.put(t2, shortname="custom_job")
+    queue.put(t2)
 
     print(queue.info)
 
