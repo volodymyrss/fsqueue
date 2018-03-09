@@ -160,16 +160,14 @@ class Queue(object):
 
         instances_for_key=self.find_task_instances(task)
         assert len(instances_for_key)<=1
+
         if len(instances_for_key) == 1:
             instance_for_key=instances_for_key[0]
         else:
-            instance_for_key=one
+            instance_for_key=None
 
-        locked_instances=[i for i in instances_for_key if i['state'] == "locked"]
-        if len(locked_instances)>0:
-            assert len(locked_instances)==1
-
-            found_task=Task.from_file(locked_instances[0]['fn'])
+        if instance_for_key is not None and instance_for_key['state']=="locked" > 0:
+            found_task=Task.from_file(instance_for_key['fn'])
             print("task found locked",found_task,"will use instead of",task)
             if len(self.find_incomplete_dependecies(found_task))==0:
                 print("dependecies complete, will unlock",found_task)
@@ -177,10 +175,10 @@ class Queue(object):
                 return
             else:
                 print("task still locked", task)
-                return locked_instance
+                return instance_for_key
 
 
-        if len(instances_for_key)>0:
+        if instance_for_key is not None:
             print("found existing instance(s) for this key, no need to put:",instances_for_key)
             return instance_for_key
 

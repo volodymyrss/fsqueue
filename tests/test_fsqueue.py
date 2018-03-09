@@ -15,11 +15,17 @@ def test_one():
     t1 = dict(test=1, data=2)
     t2 = dict(test=1, data=3)
 
-    assert queue.put(t1)[0]['state'] == "submitted"
-    assert queue.put(t1)[0]['state'] == "waiting"
+    assert queue.put(t1)['state'] == "submitted"
+
+    assert queue.info['waiting'] == 1
+
+    assert queue.put(t1)['state'] == "waiting"
 
     time.sleep(0.1)
-    queue.put(t2, shortname="custom_job")
+
+    assert queue.put(t2, shortname="custom_job")['state'] == "submitted"
+
+    assert queue.info['waiting'] == 2
 
     print(queue.info)
 
@@ -32,6 +38,9 @@ def test_one():
     print(queue.info)
 
     t=queue.get().task_data
+
+    assert queue.info['waiting'] == 1
+    assert queue.info['running'] == 1
 
     print("from queue",t)
     print("original",t1)
@@ -63,14 +72,14 @@ def test_locked_jobs():
     import fsqueue
 
     queue=fsqueue.Queue("./queue")
-    queue.wipe(["waiting","done","running","locked"])
+    queue.wipe(["waiting","done","running","locked","failed"])
 
     assert queue.info['waiting']==0
 
     t1 = dict(test=1, data=2)
     t2 = dict(test=1, data=3)
 
-    assert queue.put(t1,depends_on=[t2]) is None
+    assert queue.put(t1,depends_on=[t2])['state']=="submitted"
 
     time.sleep(0.1)
     queue.put(t2, shortname="custom_job")
