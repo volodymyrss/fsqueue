@@ -6,13 +6,20 @@ import time
 import socket
 from hashlib import sha224
 from collections import OrderedDict
+import glob
 import logging
 
-logger=logging.getLogger("root")
-logger.setLevel(logging.DEBUG)
+logger=logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+handler=logging.StreamHandler()
+logger.addHandler(handler)
+formatter = logging.Formatter('%(asctime)s %(levelname)8s %(name)s | %(message)s')
+handler.setFormatter(formatter)
 
+def log(*args,**kwargs):
+    severity=kwargs.get('severity','info').upper()
+    logger.log(getattr(logging,severity)," ".join([repr(arg) for arg in list(args)+list(kwargs.items())]))
 
-import glob
 
 class Empty(Exception):
     pass
@@ -77,8 +84,8 @@ class Task(object):
 
 
         filename_components.append(sha224(str(self.task_data).encode('utf-8')).hexdigest()[:8])
-        logger.debug("encoding:", filename_components)
-        logger.debug(str(self.task_data).encode('utf-8'))
+        log("encoding: "+repr(filename_components),severity="debug")
+        log(str(self.task_data).encode('utf-8'),severity="debug")
 
         if not key:
             filename_components.append("%.14lg"%self.submission_info['time'])
@@ -148,17 +155,17 @@ class Queue(object):
     def try_all_locked(self):
         r=[]
         for task_fn in self.list("locked"):
-            print("trying to unlock", task_fn)
+            log("trying to unlock", task_fn)
             r.append(self.try_to_unlock(Task.from_file(self.queue_dir("locked")+"/"+task_fn)))
         return r
 
     def try_to_unlock(self,task):
         if len(self.find_incomplete_dependecies(task)) == 0:
-            print("dependecies complete, will unlock", task)
+            log("dependecies complete, will unlock", task)
             self.move_task("locked", "waiting", task.filename_instance)
             return dict(state="waiting", fn=self.queue_dir("waiting") + "/" + task.filename_instance)
         else:
-            print("task still locked", task)
+            log("task still locked", task)
             return dict(state="locked",fn=self.queue_dir("locked")+"/"+task.filename_instance)
 
     def put(self,task_data,submission_data=None, depends_on=None):
@@ -176,11 +183,11 @@ class Queue(object):
 
         if instance_for_key is not None and instance_for_key['state']=="locked":
             found_task=Task.from_file(instance_for_key['fn'])
-            print("task found locked", found_task, "will use instead of", task)
+            log("task found locked", found_task, "will use instead of", task)
             return self.try_to_unlock(found_task)
 
         if instance_for_key is not None:
-            print("found existing instance(s) for this key, no need to put:",instances_for_key)
+            log("found existing instance(s) for this key, no need to put:",instances_for_key)
             return instance_for_key
 
         if depends_on is None:
@@ -192,12 +199,12 @@ class Queue(object):
 
         recovered_task=Task.from_file(fn)
         if recovered_task.filename_instance != task.filename_instance:
-            print("inconsitent storage:")
-            print("stored:",task.filename_instance)
-            print("recovered:", recovered_task.filename_instance)
+            log("inconsitent storage:")
+            log("stored:",task.filename_instance)
+            log("recovered:", recovered_task.filename_instance)
             raise Exception("Inconsistent storage")
 
-
+        log("successfully put in queue:",fn)
         return dict(state="submitted",fn=fn)
 
     def get(self):
@@ -216,12 +223,12 @@ class Queue(object):
                 
         self.current_task = Task.from_file(self.queue_dir("waiting")+"/"+task_name)
 
-        print(self.current_task.filename_instance,task_name)
+        log(self.current_task.filename_instance,task_name)
 
         if self.current_task.filename_instance != task_name:
-            print("inconsitent storage:")
-            print(">>>> stored:", task_name)
-            print(">>>> recovered:", self.current_task.filename_instance)
+            log("inconsitent storage:")
+            log(">>>> stored:", task_name)
+            log(">>>> recovered:", self.current_task.filename_instance)
             raise Exception("Inconsistent storage")
 
         assert os.path.exists(self.queue_dir("waiting")+"/"+self.current_task.filename_instance)
@@ -229,10 +236,12 @@ class Queue(object):
         self.current_task_status = "waiting"
         self.clear_current_task_entry()
 
+        log("tast is not waiting",self.task_fn)
         self.current_task_status = "running"
         self.current_task.to_file(self.task_fn)
+        log("tast is running", self.task_fn)
 
-        print('task',self.current_task.submission_info)
+        log('task',self.current_task.submission_info)
 
         return self.current_task
 
@@ -244,9 +253,9 @@ class Queue(object):
         for dependency in task.depends_on:
             dependency_task=Task(dependency)
             dependency_instances=self.find_task_instances(dependency_task)
-            print("dependency:", dependency, dependency_instances)
+            log("dependency:", dependency, dependency_instances)
             if len([i for i in dependency_instances if i['state']=="done"]) == 0:
-                print("dependency incomplete")
+                log("dependency incomplete")
                 incomplete_dependencies.append(dependency_task)
 
         return incomplete_dependencies
@@ -255,6 +264,7 @@ class Queue(object):
 
 
     def task_locked(self,depends_on):
+        log("locking task",self.current_task)
         self.clear_current_task_entry()
         self.current_task_status="locked"
         self.current_task.depends_on=depends_on
@@ -264,6 +274,7 @@ class Queue(object):
 
 
     def task_done(self):
+        log("task done",self.current_task)
         self.clear_current_task_entry()
         self.current_task_status="done"
         self.current_task.to_file(self.task_fn)
@@ -307,10 +318,10 @@ class Queue(object):
         for fromk in wipe_from:
             for taskname in self.list(fromk):
                 if purge:
-                    print("removing",self.queue_dir(fromk) + "/" + taskname)
+                    log("removing",self.queue_dir(fromk) + "/" + taskname)
                     os.remove(self.queue_dir(fromk) + "/" + taskname)
                 else:
-                    print("to delete",self.queue_dir(fromk) + "/" + taskname)
+                    log("to delete",self.queue_dir(fromk) + "/" + taskname)
                     self.move_task(fromk,"deleted",taskname=taskname)
 
     def list(self,kind=None,kinds=None,fullpath=False):
@@ -339,7 +350,7 @@ class Queue(object):
 
     def watch(self,delay=1):
         while True:
-            print(self.info())
+            log(self.info())
             time.sleep(delay)
 
 
