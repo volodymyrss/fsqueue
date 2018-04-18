@@ -27,6 +27,9 @@ class Empty(Exception):
 class CurrentTaskUnfinished(Exception):
     pass
 
+class TaskStolen(Exception):
+    pass
+
 class Task(object):
     def __init__(self,task_data,execution_info=None, submission_data=None, depends_on=None):
         self.task_data=task_data
@@ -60,7 +63,13 @@ class Task(object):
 
     @classmethod
     def from_file(cls,fn):
-        task_dict=yaml.load(open(fn))
+        try:
+            task_dict=yaml.load(open(fn))
+        except IOError as e:
+            raise TaskStolen()
+
+        if task_dict is None:
+            raise TaskStolen("empty: probably not written")
 
         self=cls(task_dict['task_data'])
         self.depends_on=task_dict['depends_on']
@@ -82,10 +91,11 @@ class Task(object):
     def get_filename(self,key=True):
         filename_components=[]
 
+        task_data_string=yaml.dump(self.task_data,encoding='utf-8')
 
-        filename_components.append(sha224(str(self.task_data).encode('utf-8')).hexdigest()[:8])
+        filename_components.append(sha224(task_data_string).hexdigest()[:8])
         log("encoding: "+repr(filename_components),severity="debug")
-        log(str(self.task_data).encode('utf-8'),severity="debug")
+        log(task_data_string,severity="debug")
 
         if not key:
             filename_components.append("%.14lg"%self.submission_info['time'])
@@ -160,10 +170,16 @@ class Queue(object):
         return r
 
     def try_to_unlock(self,task):
-        if len(self.find_incomplete_dependecies(task)) == 0:
+        dependency_states=self.find_dependecies_states(task)
+
+        if all([d['state']=="done" for d in dependency_states]):
             log("dependecies complete, will unlock", task)
             self.move_task("locked", "waiting", task.filename_instance)
             return dict(state="waiting", fn=self.queue_dir("waiting") + "/" + task.filename_instance)
+        if any([d['state']=="failed" for d in dependency_states]):
+            log("dependecies complete, will unlock", task)
+            self.move_task("locked", "failed", task.filename_instance)
+            return dict(state="failed", fn=self.queue_dir("failed") + "/" + task.filename_instance)
         else:
             log("task still locked", task)
             return dict(state="locked",fn=self.queue_dir("locked")+"/"+task.filename_instance)
@@ -202,6 +218,16 @@ class Queue(object):
             log("inconsitent storage:")
             log("stored:",task.filename_instance)
             log("recovered:", recovered_task.filename_instance)
+    
+            nfn=self.queue_dir("conflict") + "/put_original_" + task.filename_instance
+            open(nfn, "w").write(task.serialize())
+        
+            nfn=self.queue_dir("conflict") + "/put_recovered_" + recovered_task.filename_instance
+            open(nfn, "w").write(recovered_task.serialize())
+            
+            nfn=self.queue_dir("conflict") + "/put_stored_" + os.path.basename(fn)
+            open(nfn, "w").write(open(fn).read())
+
             raise Exception("Inconsistent storage")
 
         log("successfully put in queue:",fn)
@@ -229,9 +255,18 @@ class Queue(object):
             log("inconsitent storage:")
             log(">>>> stored:", task_name)
             log(">>>> recovered:", self.current_task.filename_instance)
+
+            fn=self.queue_dir("conflict") + "/get_stored_" + self.current_task.filename_instance
+            open(fn, "w").write(self.current_task.serialize())
+        
+            fn=self.queue_dir("conflict") + "/get_recovered_" + task_name
+            open(fn, "w").write(open(self.queue_dir("waiting")+"/"+task_name).read())
+
             raise Exception("Inconsistent storage")
 
-        assert os.path.exists(self.queue_dir("waiting")+"/"+self.current_task.filename_instance)
+        if not os.path.exists(self.queue_dir("waiting")+"/"+self.current_task.filename_instance):
+            self.current_task = None
+            raise TaskStolen()
 
         self.current_task_status = "waiting"
         self.clear_current_task_entry()
@@ -245,20 +280,33 @@ class Queue(object):
 
         return self.current_task
 
-    def find_incomplete_dependecies(self,task):
+    def find_dependecies_states(self,task):
         if task.depends_on is None:
             raise Exception("can not inspect dependecies in an independent task!")
 
-        incomplete_dependencies=[]
+        dependencies=[]
         for dependency in task.depends_on:
             dependency_task=Task(dependency)
             dependency_instances=self.find_task_instances(dependency_task)
-            log("dependency:", dependency, dependency_instances)
-            if len([i for i in dependency_instances if i['state']=="done"]) == 0:
-                log("dependency incomplete")
-                incomplete_dependencies.append(dependency_task)
 
-        return incomplete_dependencies
+            dependencies.append(dict(states=[]))
+
+            for i in dependency_instances:
+                # if i['state']=="done"]) == 0:
+                #log("dependency incomplete")
+                dependencies[-1]['states'].append(i['state'])
+                dependencies[-1]['task']=dependency_task
+
+            if 'done' in dependencies[-1]['states']:
+                dependencies[-1]['state']='done'
+            elif 'failed' in dependencies[-1]['states']:
+                dependencies[-1]['state']='failed'
+            else:
+                dependencies[-1]['state']='incomplete'
+            
+            log("dependency:",dependencies[-1]['state'],dependencies[-1]['states'], dependency, dependency_instances)
+
+        return dependencies
 
 
 
@@ -294,7 +342,12 @@ class Queue(object):
     def clear_current_task_entry(self,status=None):
         if status is None:
             status=self.current_task_status
-        os.remove(self.queue_dir(status) + "/" + self.current_task.filename_instance)
+
+        try:
+            os.remove(self.queue_dir(status) + "/" + self.current_task.filename_instance)
+        except OSError:
+            log("current task stolen!")
+            raise TaskStolen()
 
     def copy_task(self,fromk,tok,taskname=None):
         if taskname is None:
@@ -309,7 +362,11 @@ class Queue(object):
 
         task=Task.from_file(self.queue_dir(fromk) + "/" + taskname)
         task.to_file(self.queue_dir(tok) + "/" + taskname)
-        os.remove(self.queue_dir(fromk) + "/" + taskname)
+
+        try:
+            os.remove(self.queue_dir(fromk) + "/" + taskname)
+        except OSError as e:
+            log("locked task stolen!",taskname,"from",fromk,"to",tok,"exception:",e)
 
     def remove_task(self,fromk,taskname=None):
         os.remove(self.queue_dir(fromk) + "/" + taskname)
