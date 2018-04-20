@@ -176,13 +176,24 @@ class Queue(object):
             log("dependecies complete, will unlock", task)
             self.move_task("locked", "waiting", task.filename_instance)
             return dict(state="waiting", fn=self.queue_dir("waiting") + "/" + task.filename_instance)
+
         if any([d['state']=="failed" for d in dependency_states]):
             log("dependecies complete, will unlock", task)
             self.move_task("locked", "failed", task.filename_instance)
             return dict(state="failed", fn=self.queue_dir("failed") + "/" + task.filename_instance)
-        else:
-            log("task still locked", task)
-            return dict(state="locked",fn=self.queue_dir("locked")+"/"+task.filename_instance)
+
+        if not any([d['state'] in ["running","waiting","locked"] for d in dependency_states]):
+            log("dependecies incomplete, but nothing will come of this anymore, will unlock", task)
+            self.move_task("locked", "waiting", task.filename_instance)
+            return dict(state="waiting", fn=self.queue_dir("waiting") + "/" + task.filename_instance)
+
+        log("task still locked", task)
+        return dict(state="locked",fn=self.queue_dir("locked")+"/"+task.filename_instance)
+    
+    def remember(self,task_data,submission_data=None):
+        task=Task(task_data,submission_data=submission_data)
+        nfn=self.queue_dir("problem") + "/"+task.filename_instance
+        open(nfn, "w").write(task.serialize())
 
     def put(self,task_data,submission_data=None, depends_on=None):
         assert depends_on is None or type(depends_on) in [list,tuple]
